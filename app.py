@@ -76,7 +76,7 @@ def get_agmarknet_prices(commodity_name: str, state_name: str):
     options.add_argument('--disable-dev-shm-usage')
     driver = None
     try:
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        driver = webdriver.Chrome(options=options)
         url = "https://agmarknet.gov.in/SearchCmmMkt.aspx"
         driver.get(url)
         driver.set_page_load_timeout(30)
