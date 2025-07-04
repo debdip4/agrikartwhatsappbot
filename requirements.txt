@@ -1,0 +1,6 @@
+Flask
+requests
+python-dotenv
+pandas
+selenium
+webdriver-manager
