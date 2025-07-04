@@ -1,6 +1,7 @@
 Flask
 requests
 python-dotenv
+gunicorn
 pandas
 selenium
 webdriver-manager
