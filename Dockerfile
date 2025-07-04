@@ -1,28 +1,29 @@
-# Use an official Python runtime
 FROM python:3.9-slim
 
-# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    CHROME_BINARY=/usr/bin/google-chrome
 
-# Set working directory
 WORKDIR /app
 
-# Install dependencies (add build tools only if needed)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
- && rm -rf /var/lib/apt/lists/*
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    wget gnupg unzip curl \
+    fonts-liberation libappindicator3-1 libasound2 libatk-bridge2.0-0 libatk1.0-0 libcups2 \
+    libdbus-1-3 libgdk-pixbuf2.0-0 libnspr4 libnss3 libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 \
+    xdg-utils --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
+# Install Chrome
+RUN curl -sSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -o chrome.deb \
+ && apt-get install -y ./chrome.deb \
+ && rm chrome.deb
 
 # Install Python requirements
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire app
 COPY . .
 
-# Expose the port used in app.py (make sure app.py uses port 5000 or change this)
 EXPOSE 5000
 
-# Start app using plain Python (Flask's built-in dev server)
 CMD ["python", "app.py"]
