@@ -1,19 +1,28 @@
 # Use an official Python runtime
 FROM python:3.9-slim
 
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 # Set working directory
 WORKDIR /app
 
-# Copy and install requirements
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies (add build tools only if needed)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+ && rm -rf /var/lib/apt/lists/*
 
-# Copy the bot code into the container
+# Install Python requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy the entire app
 COPY . .
 
-# Expose the port the app runs on
+# Expose the port used in app.py (make sure app.py uses port 5000 or change this)
 EXPOSE 5000
 
-# Command to run the Flask app using Gunicorn
-# This looks for the 'app' variable inside your 'app.py' file
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
+# Start app using plain Python (Flask's built-in dev server)
+CMD ["python", "app.py"]
