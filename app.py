@@ -350,6 +350,6 @@ def webhook():
     return 'OK', 200
 
 
-if __name__ == '__main__':
-    print("WhatsApp Bot Running...")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+@app.route('/', methods=['GET'])
+def health_check():
+    return 'OK', 200
