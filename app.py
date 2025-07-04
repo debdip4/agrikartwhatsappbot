@@ -17,14 +17,14 @@ from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from statistics import mean
 
-load_dotenv()
+
 app = Flask(__name__)
 
 # --- Load Credentials ---
-ACCESS_TOKEN = os.getenv('ACCESS_TOKEN')
-VERIFY_TOKEN = os.getenv('VERIFY_TOKEN')
-PHONE_NUMBER_ID = os.getenv('PHONE_NUMBER_ID')
-API_BASE_URL = os.getenv('BACKEND_API_BASE_URL')
+ACCESS_TOKEN = os.environ['ACCESS_TOKEN']
+VERIFY_TOKEN = os.environ['VERIFY_TOKEN']
+PHONE_NUMBER_ID = os.environ['PHONE_NUMBER_ID']
+API_BASE_URL = os.environ['BACKEND_API_BASE_URL']
 
 # --- In-memory database for hackathon prototype ---
 user_states = {}
