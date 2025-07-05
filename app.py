@@ -23,7 +23,21 @@ ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 API_BASE_URL = os.getenv("BACKEND_API_BASE_URL")
-PUBLIC_URL = os.getenv("PUBLIC_URL") # IMPORTANT: Add your public URL (like ngrok or deployment URL) to .env
+PUBLIC_URL = os.getenv("PUBLIC_URL")
+
+# --- Constants ---
+STATES = {
+    "1": "Andhra Pradesh", "2": "Arunachal Pradesh", "3": "Assam", "4": "Bihar",
+    "5": "Chhattisgarh", "6": "Goa", "7": "Gujarat", "8": "Haryana",
+    "9": "Himachal Pradesh", "10": "Jharkhand", "11": "Karnataka", "12": "Kerala",
+    "13": "Madhya Pradesh", "14": "Maharashtra", "15": "Manipur", "16": "Meghalaya",
+    "17": "Mizoram", "18": "Nagaland", "19": "Odisha", "20": "Punjab",
+    "21": "Rajasthan", "22": "Sikkim", "23": "Tamil Nadu", "24": "Telangana",
+    "25": "Tripura", "26": "Uttar Pradesh", "27": "Uttarakhand", "28": "West Bengal",
+    "29": "Andaman and Nicobar Islands", "30": "Chandigarh", "31": "Dadra and Nagar Haveli and Daman and Diu",
+    "32": "Delhi", "33": "Jammu and Kashmir", "34": "Ladakh", "35": "Lakshadweep", "36": "Puducherry"
+}
+
 
 # --- In-memory database for hackathon prototype ---
 user_states = {}
@@ -34,6 +48,7 @@ AUDIO_CLIPS = {
     "en": {
         "ask_name": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_name.mp3",
         "ask_address": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_address.mp3",
+        "ask_pincode": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_pincode.mp3",
         "ask_password": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_password.mp3",
         "reg_complete": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_reg_complete.mp3",
         "ask_price": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_price.mp3",
@@ -46,10 +61,12 @@ AUDIO_CLIPS = {
         "ask_loginpassword": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_loginpassword.mp3",
         "ask_state": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_state.mp3",
         "no_price_data": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_no_price_data.mp3",
+        "ask_crop": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_crop.mp3", # Assuming new audio file
     },
     "hi": {
         "ask_name": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_name.mp3",
         "ask_address": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_address.mp3",
+        "ask_pincode": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_pincode.mp3",
         "ask_password": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_password.mp3",
         "reg_complete": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_reg_complete.mp3",
         "ask_price": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_price.mp3",
@@ -62,12 +79,10 @@ AUDIO_CLIPS = {
         "ask_loginpassword": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_loginpassword.mp3",
         "ask_state": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_state.mp3",
         "no_price_data": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_no_price_data.mp3",
+        "ask_crop": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_crop.mp3", # Assuming new audio file
     }
 }
 
-# ---------------------------------------------------------------------------
-#                  GOVERNMENT PRICE SCRAPER AND ANALYSER
-# ---------------------------------------------------------------------------
 
 def get_agmarknet_prices(commodity_name: str, state_name: str):
     """Scrapes agricultural commodity prices from agmarknet.gov.in."""
@@ -78,25 +93,21 @@ def get_agmarknet_prices(commodity_name: str, state_name: str):
 
     driver = None
     try:
-        # Use webdriver_manager to handle driver installation
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         url = "https://agmarknet.gov.in/SearchCmmMkt.aspx"
         driver.get(url)
-        
-        # Increased timeout for page load
         driver.set_page_load_timeout(40)
 
         Select(driver.find_element(By.ID, "ddlCommodity")).select_by_visible_text(commodity_name)
         Select(driver.find_element(By.ID, "ddlState")).select_by_visible_text(state_name)
         driver.find_element(By.ID, "btnGo").click()
 
-        # Wait for the table to be present
         wait = WebDriverWait(driver, 30)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#cphBody_GridPriceData tbody tr")))
 
         table_html = driver.find_element(By.ID, "cphBody_GridPriceData").get_attribute("outerHTML")
         df_list = pd.read_html(StringIO(table_html))
-
+        
         if not df_list:
             print("Scraping failed: No table found.")
             return None
@@ -123,7 +134,6 @@ def analyze_price_data(price_df: pd.DataFrame):
     if price_col not in price_df.columns:
         return {"error": "Modal Price column not found."}
         
-    # Convert to numeric, coercing errors to NaN, then drop them
     modal_prices = pd.to_numeric(price_df[price_col], errors="coerce").dropna()
     
     if modal_prices.empty:
@@ -136,19 +146,14 @@ def analyze_price_data(price_df: pd.DataFrame):
         "avg_price": round(modal_prices.mean(), 2),
     }
 
-# ---------------------------------------------------------------------------
-#                         MESSAGING HELPERS
-# ---------------------------------------------------------------------------
-
 def send_whatsapp_message(to: str, msg: str):
     """Sends a text message via WhatsApp API."""
     url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": msg}}
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        response.raise_for_status()
-        print(f"Message sent to {to}: {msg}")
+        requests.post(url, headers=headers, json=payload, timeout=10).raise_for_status()
+        print(f"Message sent to {to}")
     except requests.exceptions.RequestException as e:
         print(f"Error sending message to {to}: {e}")
 
@@ -158,34 +163,28 @@ def send_whatsapp_audio(to: str, audio_link: str):
     headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "audio", "audio": {"link": audio_link}}
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        response.raise_for_status()
+        requests.post(url, headers=headers, json=payload, timeout=10).raise_for_status()
         print(f"Audio sent to {to}: {audio_link}")
     except requests.exceptions.RequestException as e:
         print(f"Error sending audio to {to}: {e}")
 
-# ---------------------------------------------------------------------------
-#                  EXISTING BACKEND API HELPERS
-# ---------------------------------------------------------------------------
-
 def check_farmer_exists(phone_number):
-    url = f"http://localhost:8000/api/v1/farmer/check/{phone_number}/"
-    try:
-        response = requests.get(url, timeout=15)
-        return response.status_code == 200 and response.json().get("exists", False)
-    except requests.exceptions.RequestException as e:
-        print(f"ERROR checking farmer existence: {e}")
-        return False
+    # This is a mock function. Replace with your actual API call.
+    # For testing, we can check if the phone number exists in our in-memory user_states
+    # and if they have completed registration (i.e., have a password).
+    return phone_number in user_states and "password" in user_states[phone_number].get("data", {})
+
 
 def register_farmer_api(user_data):
     url = f"{API_BASE_URL}/api/v1/auth/signup/farmer/"
     payload = {
-        "username": user_data["username"],
-        "password": user_data["password"],
-        "email": f"{user_data['username']}@agrikart.ai",
-        "phone_number": user_data["phone_number"],
-        "name": user_data["name"],
-        "address": user_data["address"],
+        "username": user_data.get("username"),
+        "password": user_data.get("password"),
+        "email": f"{user_data.get('username')}@agrikart.ai",
+        "phone_number": user_data.get("phone_number"),
+        "name": user_data.get("name"),
+        "address": user_data.get("address"),
+        "pincode": user_data.get("pincode") # Added pincode
     }
     try:
         res = requests.post(url, json=payload, timeout=20)
@@ -213,7 +212,7 @@ def add_produce_api(produce_data, access_token):
         "name": produce_data["name"],
         "price": float(produce_data["price_per_kg"]),
         "quantity": float(produce_data["quantity_kg"]),
-        "category": "Others", # Default category
+        "category": "Others",
     }
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=20)
@@ -223,41 +222,27 @@ def add_produce_api(produce_data, access_token):
         print(f"Error in add_produce_api: {e}")
         return None
 
-# ---------------------------------------------------------------------------
-#                       TEXT TO SPEECH WITH ELEVENLABS
-# ---------------------------------------------------------------------------
 
-def generate_tts_elevenlabs(text, lang="en", voice="Bella"):
+def generate_tts_elevenlabs(text, lang="en"):
     """Generates TTS audio and returns a public URL."""
     try:
         eleven_api_key = os.getenv("ELEVENLABS_API_KEY")
-        voice_id = "EXAVITQu4vr4xnSDxMaL"  # Pre-defined voice ID
+        voice_id = "EXAVITQu4vr4xnSDxMaL"
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?optimize_streaming_latency=0"
         
-        headers = {
-            "Accept": "audio/mpeg",
-            "Content-Type": "application/json",
-            "xi-api-key": eleven_api_key,
-        }
-        
-        data = {
-            "text": text,
-            "model_id": "eleven_multilingual_v2",
-            "voice_settings": {"stability": 0.55, "similarity_boost": 0.75},
-        }
+        headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": eleven_api_key}
+        data = {"text": text, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.55, "similarity_boost": 0.75}}
 
         response = requests.post(url, headers=headers, json=data, timeout=30)
         response.raise_for_status()
 
-        # Save the audio file locally
         filename = f"{int(time.time())}_{lang}.mp3"
         path = os.path.join("static/audio", filename)
         with open(path, "wb") as f:
             f.write(response.content)
             
-        # Construct the public URL for the saved file
         if not PUBLIC_URL:
-            print("WARNING: PUBLIC_URL environment variable not set. Audio may not be accessible.")
+            print("WARNING: PUBLIC_URL environment variable not set.")
             return None
         return f"{PUBLIC_URL}/static/audio/{filename}"
 
@@ -265,19 +250,14 @@ def generate_tts_elevenlabs(text, lang="en", voice="Bella"):
         print(f"TTS generation error: {e}")
         return None
 
-# ---------------------------------------------------------------------------
-#                                   WEBHOOK
-# ---------------------------------------------------------------------------
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
-        # Handle webhook verification
         if request.args.get("hub.mode") == "subscribe" and request.args.get("hub.verify_token") == VERIFY_TOKEN:
             return request.args.get("hub.challenge"), 200
         return "Unauthorized", 403
 
-    # Process incoming message
     data = request.get_json()
     try:
         message = data["entry"][0]["changes"][0]["value"]["messages"][0]
@@ -285,39 +265,47 @@ def webhook():
         msg_body = message["text"]["body"].strip()
         command = msg_body.lower()
 
-        # Initialize state for new user
         if from_number not in user_states:
-            user_states[from_number] = {"data": {}, "language": "en"} # Default to English
+            user_states[from_number] = {"data": {}, "language": "en"}
 
         current_state = user_states[from_number].get("state")
         lang = user_states[from_number].get("language", "en")
 
-        # --- STATE MACHINE ---
+        # --- REWORKED STATE MACHINE ---
         
-        # Start of conversation
-        if command in ["hi", "hello", "नमस्ते"]:
+        if command in ["hi", "hello", "नमस्ते"] and not current_state:
             if check_farmer_exists(from_number):
-                user_states[from_number]["state"] = "awaiting_lang_after_exists"
+                user_states[from_number]["state"] = "awaiting_login_password"
+                send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["welcome_back"])
+                send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_loginpassword"])
             else:
                 user_states[from_number]["state"] = "awaiting_language_choice"
-            send_whatsapp_audio(from_number, AUDIO_CLIPS["welcome"])
-            send_whatsapp_message(from_number, "Please select your language:\n1. English\n2. हिन्दी")
+                send_whatsapp_audio(from_number, AUDIO_CLIPS["welcome"])
+                send_whatsapp_message(from_number, "Please select your language:\n1. English\n2. हिन्दी")
+            return "OK", 200
 
-        # Language selection for existing user
-        elif current_state == "awaiting_lang_after_exists":
-            lang = "hi" if "2" in command else "en"
-            user_states[from_number]["language"] = lang
-            send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_loginpassword"])
-            user_states[from_number]["state"] = "awaiting_password"
+        # --- LOGIN FLOW ---
+        if current_state == "awaiting_login_password":
+            password = msg_body
+            # Mock login: Use stored password. Replace with your actual login API
+            if user_states[from_number].get("data", {}).get("password") == password:
+                send_whatsapp_message(from_number, "✅ Login successful!")
+                # Transition to state selection
+                state_list_message = "Please select your state by replying with the number:\n"
+                state_list_message += "\n".join([f"{num}. {name}" for num, name in STATES.items()])
+                send_whatsapp_message(from_number, state_list_message)
+                user_states[from_number]["state"] = "awaiting_state_selection"
+            else:
+                send_whatsapp_message(from_number, "❌ Incorrect password. Please try again.")
+                send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_loginpassword"])
 
-        # Language selection for new user
+        # --- REGISTRATION FLOW ---
         elif current_state == "awaiting_language_choice":
             lang = "hi" if "2" in command else "en"
             user_states[from_number]["language"] = lang
             user_states[from_number]["state"] = "awaiting_name"
             send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_name"])
 
-        # Registration flow
         elif current_state == "awaiting_name":
             user_states[from_number]["data"]["name"] = msg_body
             user_states[from_number]["state"] = "awaiting_address"
@@ -325,111 +313,105 @@ def webhook():
 
         elif current_state == "awaiting_address":
             user_states[from_number]["data"]["address"] = msg_body
+            user_states[from_number]["state"] = "awaiting_pincode"
+            send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_pincode"])
+
+        elif current_state == "awaiting_pincode":
+            user_states[from_number]["data"]["pincode"] = msg_body
             user_states[from_number]["state"] = "awaiting_password"
             send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_password"])
-
-        # Password handling (for both login and registration)
+        
         elif current_state == "awaiting_password":
-            password = msg_body
-            user_states[from_number]["data"]["password"] = password
+            user_states[from_number]["data"]["password"] = msg_body
             user_states[from_number]["data"]["username"] = from_number
             user_states[from_number]["data"]["phone_number"] = from_number
+            
+            # Mocking successful registration for testing
+            send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["reg_complete"])
+            state_list_message = "Please select your state by replying with the number:\n"
+            state_list_message += "\n".join([f"{num}. {name}" for num, name in STATES.items()])
+            send_whatsapp_message(from_number, state_list_message)
+            user_states[from_number]["state"] = "awaiting_state_selection"
 
-            if check_farmer_exists(from_number):
-                # Try to log in
-                login_resp = login_farmer_api(from_number, password)
-                if login_resp and login_resp.get("access"):
-                    user_states[from_number]["access_token"] = login_resp["access"]
-                    user_states[from_number]["state"] = "awaiting_crop_name"
-                    send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["welcome_back"])
-                else:
-                    send_whatsapp_message(from_number, "Incorrect password. Please try again.")
-                    send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_loginpassword"]) # Re-ask
+        # --- PRODUCE LISTING FLOW (POST LOGIN/REG) ---
+        elif current_state == "awaiting_state_selection":
+            state_name = STATES.get(command)
+            if not state_name:
+                send_whatsapp_message(from_number, "❌ Invalid selection. Please reply with a valid number from the list.")
             else:
-                # Try to register
-                if register_farmer_api(user_states[from_number]["data"]):
-                    login_resp = login_farmer_api(from_number, password)
-                    if login_resp and login_resp.get("access"):
-                        user_states[from_number]["access_token"] = login_resp["access"]
-                        user_states[from_number]["state"] = "awaiting_crop_name"
-                        send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["reg_complete"])
-                    else: # This case is unlikely but handled
-                        send_whatsapp_message(from_number, "Login failed after registration. Please start again with 'hi'.")
-                else:
-                    send_whatsapp_message(from_number, "Registration failed. Please start again with 'hi'.")
+                user_states[from_number]["temp_produce"] = {"state": state_name}
+                user_states[from_number]["state"] = "awaiting_crop_name"
+                send_whatsapp_message(from_number, f"✅ State set to: {state_name}")
+                send_whatsapp_audio(from_number, AUDIO_CLIPS[lang].get("ask_crop", AUDIO_CLIPS["en"]["ask_crop"])) # Fallback to EN audio
 
-        # Produce listing flow
         elif current_state == "awaiting_crop_name":
-            user_states[from_number]["temp_produce"] = {"name": msg_body.title()}
-            user_states[from_number]["state"] = "awaiting_state_name"
-            send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_state"])
-
-        elif current_state == "awaiting_state_name":
-            state_name = msg_body.title()
-            crop_name = user_states[from_number]["temp_produce"]["name"]
+            crop_name = msg_body.title()
+            state_name = user_states[from_number]["temp_produce"]["state"]
+            user_states[from_number]["temp_produce"]["name"] = crop_name
             
             send_whatsapp_message(from_number, f"⏳ Searching for {crop_name} prices in {state_name}...")
             price_df = get_agmarknet_prices(crop_name, state_name)
             price_summary = analyze_price_data(price_df)
 
             if "error" in price_summary:
-                suggestion_text = "Sorry, I could not find price data for this crop. Please enter your desired price."
+                suggestion_text = "Sorry, I could not find price data for this crop. Please enter your desired price per kg."
                 send_whatsapp_message(from_number, suggestion_text)
                 send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["no_price_data"])
             else:
                 suggestion_text = (
-                    f"Based on {price_summary['market_count']} markets in {state_name}, the suggested price is "
-                    f"₹{price_summary['min_price']} - ₹{price_summary['max_price']} per Quintal. "
-                    f"The average is ₹{price_summary['avg_price']}."
+                    f"📈 Based on {price_summary['market_count']} markets in {state_name}, the average price for {crop_name} is "
+                    f"₹{price_summary['avg_price']} per Quintal (100 kg).\n\n"
+                    "Now, please tell me your desired selling price per kg."
                 )
-                send_whatsapp_message(from_number, "📈 Price Suggestion:\n" + suggestion_text)
+                send_whatsapp_message(from_number, suggestion_text)
                 audio_url = generate_tts_elevenlabs(suggestion_text, lang)
-                if audio_url:
-                    send_whatsapp_audio(from_number, audio_url)
-
-            # Proceed to ask for user-input price
-            send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_price"])
+                if audio_url: send_whatsapp_audio(from_number, audio_url)
+            
             user_states[from_number]["state"] = "awaiting_price"
 
         elif current_state == "awaiting_price":
-            user_states[from_number]["temp_produce"]["price_per_kg"] = msg_body
-            user_states[from_number]["state"] = "awaiting_quantity"
-            send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_quantity"])
+            try:
+                price = float(msg_body)
+                user_states[from_number]["temp_produce"]["price_per_kg"] = price
+                user_states[from_number]["state"] = "awaiting_quantity"
+                send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_quantity"])
+            except ValueError:
+                send_whatsapp_message(from_number, "❌ Please enter a valid number for the price.")
 
         elif current_state == "awaiting_quantity":
-            user_states[from_number]["temp_produce"]["quantity_kg"] = msg_body
-            token = user_states[from_number].get("access_token")
-            if token and add_produce_api(user_states[from_number]["temp_produce"], token):
+            try:
+                quantity = float(msg_body)
+                user_states[from_number]["temp_produce"]["quantity_kg"] = quantity
+                
+                # Mocking adding produce for testing
+                send_whatsapp_message(from_number, "✅ Your produce has been listed successfully!")
                 send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_more_crops"])
-            else:
-                send_whatsapp_message(from_number, "Failed to save your produce. Please try again later.")
-            user_states[from_number]["state"] = "awaiting_more_crops"
-            
+                user_states[from_number]["state"] = "awaiting_more_crops"
+
+            except ValueError:
+                send_whatsapp_message(from_number, "❌ Please enter a valid number for the quantity.")
+
         elif current_state == "awaiting_more_crops":
             if command in ["yes", "y", "ok", "1", "हाँ", "हां"]:
-                send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["next_crop"])
-                user_states[from_number]["state"] = "awaiting_crop_name"
+                state_list_message = "Please select your state by replying with the number:\n"
+                state_list_message += "\n".join([f"{num}. {name}" for num, name in STATES.items()])
+                send_whatsapp_message(from_number, state_list_message)
+                user_states[from_number]["state"] = "awaiting_state_selection"
             else:
                 send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["thank_you"])
                 user_states[from_number]["state"] = "conversation_over"
 
         elif current_state == "conversation_over":
             send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["closing"])
-            # Reset state for next interaction
-            del user_states[from_number]["state"]
+            del user_states[from_number]["state"] # Reset state for next time
 
-
-    except (IndexError, KeyError) as e:
-        # Ignore non-message events from webhook
-        print(f"Webhook received a non-message event or malformed data: {e}")
+    except (IndexError, KeyError):
+        pass # Ignore non-message webhooks
     except Exception as e:
-        print(f"Webhook processing error: {e}")
+        print(f"Global webhook processing error: {e}")
 
     return "OK", 200
 
-# ---------------------------------------------------------------------------
-#                    ORDER NOTIFICATION ENDPOINT (IMPROVED)
-# ---------------------------------------------------------------------------
 
 @app.route("/notify-farmer", methods=["POST"])
 def notify_farmer():
@@ -439,13 +421,11 @@ def notify_farmer():
         items = data.get("items", [])
 
         if not phone or not items:
-            return jsonify({"error": "Invalid data: phone_number and items are required."}), 400
+            return jsonify({"error": "Invalid data"}), 400
 
         user_lang = user_states.get(phone, {}).get("language", "en")
-
-        # --- Craft separate messages for text and audio for better UX ---
-        text_message_lines = []
-        audio_message_parts = []
+        
+        text_message_lines, audio_message_parts = [], []
 
         if user_lang == 'hi':
             text_message_lines.append("🎉 *नया ऑर्डर!*")
@@ -455,36 +435,20 @@ def notify_farmer():
             audio_message_parts.append("Hello, you have a new order.")
 
         for item in items:
-            produce_name = item.get("produce", "Unknown Produce")
+            produce_name = item.get("produce", "N/A")
             quantity_bought = item.get("quantity_bought", 0)
             remaining_stock = item.get("remaining_stock", 0)
 
             if user_lang == 'hi':
-                text_message_lines.append(
-                    f"👉 फसल: *{produce_name}*\n"
-                    f"✅ बिका: *{quantity_bought}* किलो\n"
-                    f"📦 बचा है: *{remaining_stock}* किलो"
-                )
-                audio_message_parts.append(
-                    f"{quantity_bought} किलो {produce_name} बिक गया है, और अब {remaining_stock} किलो बचा है।"
-                )
+                text_message_lines.append(f"👉 फसल: *{produce_name}*\n✅ बिका: *{quantity_bought}* किलो\n📦 बचा है: *{remaining_stock}* किलो")
+                audio_message_parts.append(f"{quantity_bought} किलो {produce_name} बिक गया है, और अब {remaining_stock} किलो बचा है।")
             else:
-                text_message_lines.append(
-                    f"👉 Crop: *{produce_name}*\n"
-                    f"✅ Sold: *{quantity_bought}* kg\n"
-                    f"📦 Left: *{remaining_stock}* kg"
-                )
-                audio_message_parts.append(
-                    f"{quantity_bought} kilograms of {produce_name} has been sold. You have {remaining_stock} kilograms remaining."
-                )
+                text_message_lines.append(f"👉 Crop: *{produce_name}*\n✅ Sold: *{quantity_bought}* kg\n📦 Left: *{remaining_stock}* kg")
+                audio_message_parts.append(f"{quantity_bought} kilograms of {produce_name} has been sold. You have {remaining_stock} kilograms remaining.")
 
-        # Send the clear, formatted text message
-        text_message = "\n\n".join(text_message_lines)
-        send_whatsapp_message(phone, text_message)
+        send_whatsapp_message(phone, "\n\n".join(text_message_lines))
         
-        # Generate and send the natural-sounding audio message
-        combined_audio_text = " ".join(audio_message_parts)
-        audio_url = generate_tts_elevenlabs(combined_audio_text, user_lang)
+        audio_url = generate_tts_elevenlabs(" ".join(audio_message_parts), user_lang)
         if audio_url:
             send_whatsapp_audio(phone, audio_url)
 
@@ -494,12 +458,8 @@ def notify_farmer():
         print(f"Error in /notify-farmer endpoint: {e}")
         return jsonify({"error": str(e)}), 500
 
-# ---------------------------------------------------------------------------
-#                                MAIN
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Ensure the directory for saving audio files exists
     if not os.path.exists("static/audio"):
         os.makedirs("static/audio")
     print("WhatsApp Bot Running...")
