@@ -1,325 +1,266 @@
 import os
-import json
-import requests
-import time
+import logging
 from flask import Flask, request, jsonify
-from dotenv import load_dotenv
 
-# --- Additional libraries for price scraping ---
-import pandas as pd
-from io import StringIO
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import Select, WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from config import VERIFY_TOKEN, AUDIO_CLIPS, CATEGORIES_EN, PRODUCTS_EN, CATEGORIES_HI
+from state_manager import StateManager
+from whatsapp_helpers import send_text_message, send_audio_message
+import backend_api_client as api
+import agmarknet_scraper
 
-load_dotenv()
+# --- Flask App Initialization ---
 app = Flask(__name__)
 
-# --- Load Credentials ---
-ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
-VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
-PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
-API_BASE_URL = os.getenv("BACKEND_API_BASE_URL")
-PUBLIC_URL = os.getenv("PUBLIC_URL")
-
-# --- Constants ---
-STATES = {
-    "1": "Andhra Pradesh", "2": "Arunachal Pradesh", "3": "Assam", "4": "Bihar",
-    "5": "Chhattisgarh", "6": "Goa", "7": "Gujarat", "8": "Haryana",
-    "9": "Himachal Pradesh", "10": "Jharkhand", "11": "Karnataka", "12": "Kerala",
-    "13": "Madhya Pradesh", "14": "Maharashtra", "15": "Manipur", "16": "Meghalaya",
-    "17": "Mizoram", "18": "Nagaland", "19": "Odisha", "20": "Punjab",
-    "21": "Rajasthan", "22": "Sikkim", "23": "Tamil Nadu", "24": "Telangana",
-    "25": "Tripura", "26": "Uttar Pradesh", "27": "Uttarakhand", "28": "West Bengal",
-    "29": "Andaman and Nicobar Islands", "30": "Chandigarh", "31": "Dadra and Nagar Haveli and Daman and Diu",
-    "32": "Delhi", "33": "Jammu and Kashmir", "34": "Ladakh", "35": "Lakshadweep", "36": "Puducherry"
-}
-
-# --- In-memory dictionary for session state ONLY ---
-user_states = {}
-
-# --- Audio Files Dictionary RESTORED ---
-AUDIO_CLIPS = {
-    "welcome": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/welcome.mp3",
-    "en": {
-        "ask_name": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_name.mp3",
-        "ask_address": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_address.mp3",
-        "ask_pincode": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_pincode.mp3",
-        "ask_password": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_password.mp3",
-        "reg_complete": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_reg_complete.mp3",
-        "ask_price": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_price.mp3",
-        "ask_quantity": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_quantity.mp3",
-        "ask_more_crops": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_more_crops.mp3",
-        "next_crop": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_next_crop.mp3",
-        "thank_you": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_thank_you.mp3",
-        "welcome_back": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_welcome_back.mp3",
-        "closing": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_closing.mp3",
-        "ask_loginpassword": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_loginpassword.mp3",
-        "ask_state": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_state.mp3",
-        "ask_crop": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_ask_crop.mp3",
-        "no_price_data": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/en_no_price_data.mp3",
-    },
-    "hi": {
-        "ask_name": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_name.mp3",
-        "ask_address": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_address.mp3",
-        "ask_pincode": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_pincode.mp3",
-        "ask_password": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_password.mp3",
-        "reg_complete": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_reg_complete.mp3",
-        "ask_price": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_price.mp3",
-        "ask_quantity": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_quantity.mp3",
-        "ask_more_crops": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_more_crops.mp3",
-        "next_crop": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_next_crop.mp3",
-        "thank_you": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_thank_you.mp3",
-        "welcome_back": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_welcome_back.mp3",
-        "closing": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_closing.mp3",
-        "ask_loginpassword": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_loginpassword.mp3",
-        "ask_state": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_state.mp3",
-        "ask_crop": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_ask_crop.mp3",
-        "no_price_data": "https://raw.githubusercontent.com/debdip4/agrikartwhatsappbot/main/Audio_files/hi_no_price_data.mp3",
-    }
-}
-
-
-# --- Helper Functions ---
-
-def send_whatsapp_message(to: str, msg: str):
-    print(f"--> Sending text to {to}: '{msg[:70]}...'")
-    payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": msg}}
-    _send_request("messages", payload)
-
-def send_whatsapp_audio(to: str, audio_link: str):
-    print(f"--> Sending audio to {to}: {audio_link}")
-    payload = {"messaging_product": "whatsapp", "to": to, "type": "audio", "audio": {"link": audio_link}}
-    _send_request("messages", payload)
-
-def _send_request(endpoint: str, payload: dict):
-    """Internal function to handle sending requests to Meta API."""
-    url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/{endpoint}"
-    headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        print(f"!!! ERROR sending Meta API request: {e}")
-
-def check_farmer_exists(phone_number):
-    url = f"{API_BASE_URL}/api/v1/farmer/check/{phone_number}/"
-    print(f"--- Checking existence for {phone_number} at {url}")
-    try:
-        response = requests.get(url, timeout=15)
-        if response.status_code == 200:
-            exists = response.json().get("exists", False)
-            print(f"--- Backend response: Farmer exists = {exists}")
-            return exists
-        print(f"--- Backend Error: Status {response.status_code}, {response.text}")
-        return False
-    except requests.exceptions.RequestException as e:
-        print(f"!!! FATAL ERROR calling backend API: {e}")
-        return False
-
-# --- Other API and Scraper functions remain unchanged ---
-def register_farmer_api(user_data):
-    url = f"{API_BASE_URL}/api/v1/auth/signup/farmer/"
-    try:
-        res = requests.post(url, json=user_data, timeout=20)
-        res.raise_for_status()
-        return res.json()
-    except Exception as e: return None
-
-def login_farmer_api(username, password):
-    url = f"{API_BASE_URL}/api/v1/auth/token/"
-    payload = {"username": username, "password": password}
-    try:
-        res = requests.post(url, json=payload, timeout=20)
-        res.raise_for_status()
-        return res.json()
-    except Exception as e: return None
-
-def add_produce_api(produce_data, access_token):
-    url = f"{API_BASE_URL}/api/v1/produce/"
-    headers = {"Authorization": f"Bearer {access_token}"}
-    try:
-        res = requests.post(url, headers=headers, json=produce_data, timeout=20)
-        res.raise_for_status()
-        return res.json()
-    except Exception as e: return None
-    
-def get_agmarknet_prices(commodity_name, state_name):
-    # This function remains the same as previous correct versions.
-    pass
-
-def analyze_price_data(price_df):
-    # This function remains the same.
-    pass
-
-def generate_tts_elevenlabs(text, lang="en"):
-    # This function is assumed to be working correctly
-    pass
-
-def set_user_state(phone, new_state):
-    """Helper to log state changes."""
-    old_state = user_states.get(phone, {}).get("state", "None")
-    user_states[phone]["state"] = new_state
-    print(f"*** STATE CHANGE for {phone}: {old_state} -> {new_state} ***")
-
-def ask_for_state_selection(to, lang):
-    """Helper function to send the state list."""
-    state_list_message = "Please select your state by replying with the number:\n\n"
-    state_list_message += "\n".join([f"{num}. {name}" for num, name in STATES.items()])
-    send_whatsapp_message(to, state_list_message)
-    send_whatsapp_audio(to, AUDIO_CLIPS[lang]["ask_state"])
+# --- Logging Configuration ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Main Webhook Logic ---
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
-        if request.args.get("hub.mode") == "subscribe" and request.args.get("hub.verify_token") == VERIFY_TOKEN:
+        # Meta Webhook Verification
+        if request.args.get("hub.verify_token") == VERIFY_TOKEN:
             return request.args.get("hub.challenge"), 200
-        return "Unauthorized", 403
+        return "Invalid verification token", 403
 
-    data = request.get_json()
-    try:
-        message = data["entry"][0]["changes"][0]["value"]["messages"][0]
-        from_number = message["from"]
-        msg_body = message["text"]["body"].strip()
-        command = msg_body.lower()
+    if request.method == "POST":
+        data = request.get_json()
+        logging.info(f"Received data: {data}")
+
+        # Ensure it's a WhatsApp message update
+        if "entry" in data and "changes" in data["entry"][0]:
+            change = data["entry"][0]["changes"][0]
+            if "messages" in change["value"]:
+                message_data = change["value"]["messages"][0]
+                from_number = message_data["from"]
+                msg_body = message_data.get("text", {}).get("body", "").strip().lower()
+
+                # Get user's current state
+                user_state = StateManager.get_user_state(from_number)
+                
+                # Process the message based on state
+                process_message(from_number, msg_body, user_state)
+
+        return jsonify({"status": "ok"}), 200
+
+def process_message(phone, msg, state):
+    """Main logic tree for processing user messages."""
+    stage = state.get('stage')
+    lang = state.get('language', 'en') # Default to English
+
+    # --- Initial Contact or Reset ---
+    if not stage:
+        if api.check_farmer_exists(phone):
+            # Existing User
+            state['stage'] = 'awaiting_login_password'
+            lang = state.get('language', 'en') # Retrieve stored language if available
+            send_audio_message(phone, AUDIO_CLIPS[lang]['welcome_back'])
+            send_audio_message(phone, AUDIO_CLIPS[lang]['ask_loginpassword'])
+        else:
+            # New User
+            state['stage'] = 'awaiting_language_selection'
+            state['registration_details'] = {'phone': phone}
+            send_audio_message(phone, AUDIO_CLIPS['welcome'])
+            send_text_message(phone, "Please select your language:\n1. English\n2. हिंदी (Hindi)")
+        StateManager.set_user_state(phone, state)
+        return
+
+    # --- Language Selection ---
+    if stage == 'awaiting_language_selection':
+        if '1' in msg:
+            state['language'] = 'en'
+            send_audio_message(phone, AUDIO_CLIPS['en']['ask_name'])
+            state['stage'] = 'awaiting_name'
+        elif '2' in msg:
+            state['language'] = 'hi'
+            send_audio_message(phone, AUDIO_CLIPS['hi']['ask_name'])
+            state['stage'] = 'awaiting_name'
+        else:
+            send_text_message(phone, "Invalid selection. Please press 1 for English or 2 for Hindi.")
+        StateManager.set_user_state(phone, state)
+        return
+
+    # --- Registration Flow ---
+    if stage == 'awaiting_name':
+        state['registration_details']['name'] = msg.title()
+        state['stage'] = 'awaiting_address'
+        send_audio_message(phone, AUDIO_CLIPS[lang]['ask_address'])
+    elif stage == 'awaiting_address':
+        state['registration_details']['address'] = msg
+        state['stage'] = 'awaiting_state'
+        send_audio_message(phone, AUDIO_CLIPS[lang]['ask_state'])
+    elif stage == 'awaiting_state':
+        state['registration_details']['state'] = msg.title()
+        state['stage'] = 'awaiting_pincode'
+        send_audio_message(phone, AUDIO_CLIPS[lang]['ask_pincode'])
+    elif stage == 'awaiting_pincode':
+        if msg.isdigit() and len(msg) == 6:
+            state['registration_details']['pincode'] = msg
+            state['stage'] = 'awaiting_password'
+            send_audio_message(phone, AUDIO_CLIPS[lang]['ask_password'])
+        else:
+            send_text_message(phone, "Invalid Pincode. Please enter a 6-digit number.")
+    elif stage == 'awaiting_password':
+        state['registration_details']['password'] = msg
+        # Register the farmer
+        if api.register_farmer(state['registration_details']):
+            # Login to get token
+            token = api.login_farmer(phone, msg)
+            if token:
+                state['token'] = token
+                state['stage'] = 'awaiting_category'
+                send_audio_message(phone, AUDIO_CLIPS[lang]['reg_complete'])
+                prompt_for_category(phone, lang)
+            else:
+                send_text_message(phone, "Registration successful, but login failed. Please try logging in again later.")
+                StateManager.reset_user_state(phone)
+        else:
+            send_text_message(phone, "Registration failed. Please try again.")
+            StateManager.reset_user_state(phone)
+
+    # --- Login Flow ---
+    elif stage == 'awaiting_login_password':
+        token = api.login_farmer(phone, msg)
+        if token:
+            state['token'] = token
+            state['stage'] = 'awaiting_category'
+            send_audio_message(phone, AUDIO_CLIPS[lang]['next_crop'])
+            prompt_for_category(phone, lang)
+        else:
+            send_text_message(phone, "Login failed. Incorrect password. Please try again.")
+            send_audio_message(phone, AUDIO_CLIPS[lang]['ask_loginpassword'])
+
+    # --- Produce Listing Flow ---
+    elif stage == 'awaiting_category':
+        categories = CATEGORIES_EN if lang == 'en' else CATEGORIES_HI
+        if msg in categories:
+            category_name = CATEGORIES_EN[msg] # Use English name for backend
+            state['current_produce'] = {'category': category_name}
+            state['stage'] = 'awaiting_product_selection'
+            prompt_for_product(phone, lang, category_name)
+        else:
+            send_text_message(phone, "Invalid selection. Please choose a valid category number.")
+    
+    elif stage == 'awaiting_product_selection':
+        try:
+            selection_index = int(msg) - 1
+            category = state['current_produce']['category']
+            product_list = PRODUCTS_EN[category]
+            if 0 <= selection_index < len(product_list):
+                product_name = product_list[selection_index]
+                state['current_produce']['name'] = product_name
+                
+                # Scrape price and suggest
+                farmer_state = state.get('registration_details', {}).get('state', '') # Need farmer's state
+                if farmer_state:
+                    price = agmarknet_scraper.get_latest_price(product_name, farmer_state)
+                    if price:
+                        price_per_kg = round(price / 100, 2)
+                        suggestion = f"The current market rate for {product_name} in {farmer_state} is around ₹{price_per_kg}/Kg. You can set your own price."
+                        if lang == 'hi':
+                           suggestion = f"{farmer_state} में {product_name} का मौजूदा बाजार भाव लगभग ₹{price_per_kg}/किलो है। आप अपनी कीमत खुद तय कर सकते हैं।"
+                        send_text_message(phone, suggestion)
+
+                state['stage'] = 'awaiting_price'
+                send_audio_message(phone, AUDIO_CLIPS[lang]['ask_price'])
+            else:
+                send_text_message(phone, "Invalid selection.")
+        except ValueError:
+            send_text_message(phone, "Please enter a valid number.")
+
+    elif stage == 'awaiting_price':
+        try:
+            price = float(msg)
+            state['current_produce']['price_per_kg'] = price
+            state['stage'] = 'awaiting_quantity'
+            send_audio_message(phone, AUDIO_CLIPS[lang]['ask_quantity'])
+        except ValueError:
+            send_text_message(phone, "Please enter a valid price (e.g., 50 or 55.5).")
+
+    elif stage == 'awaiting_quantity':
+        try:
+            quantity = float(msg)
+            state['current_produce']['quantity_kg'] = quantity
+            # Add produce to backend
+            if api.add_produce(state['token'], state['current_produce']):
+                msg_text = f"{state['current_produce']['name']} has been listed successfully!"
+                if lang == 'hi':
+                    msg_text = f"{state['current_produce']['name']} सफलतापूर्वक सूचीबद्ध हो गया है!"
+                send_text_message(phone, msg_text)
+                state['stage'] = 'awaiting_more_crops'
+                send_audio_message(phone, AUDIO_CLIPS[lang]['ask_more_crops'])
+                send_text_message(phone, "1. Yes\n2. No")
+            else:
+                send_text_message(phone, "Could not list your produce. Please try again later.")
+                StateManager.reset_user_state(phone)
+        except ValueError:
+             send_text_message(phone, "Please enter a valid quantity in Kg (e.g., 100 or 50.5).")
+
+    elif stage == 'awaiting_more_crops':
+        if msg == '1' or msg == 'yes':
+            state['stage'] = 'awaiting_category'
+            send_audio_message(phone, AUDIO_CLIPS[lang]['next_crop'])
+            prompt_for_category(phone, lang)
+        elif msg == '2' or msg == 'no':
+            StateManager.reset_user_state(phone)
+            state['stage'] = 'finished'
+            send_audio_message(phone, AUDIO_CLIPS[lang]['thank_you'])
+        else:
+            send_text_message(phone, "Invalid input. Please enter 1 for Yes or 2 for No.")
+            
+    # --- Closing ---
+    if 'thank you' in msg or 'dhanyawad' in msg:
+        send_audio_message(phone, AUDIO_CLIPS[lang]['closing'])
+        StateManager.reset_user_state(phone) # Reset state for next interaction
+        state['stage'] = None
+            
+    # Save the updated state
+    StateManager.set_user_state(phone, state)
+
+
+def prompt_for_category(phone, lang):
+    """Sends the category list to the user."""
+    if lang == 'en':
+        categories = CATEGORIES_EN
+        header = "Please select a category for your produce:"
+    else:
+        categories = CATEGORIES_HI
+        header = "कृपया अपनी उपज के लिए एक श्रेणी चुनें:"
+    
+    category_list = "\n".join([f"{num}. {name}" for num, name in categories.items()])
+    send_text_message(phone, f"{header}\n{category_list}")
+
+def prompt_for_product(phone, lang, category_name):
+    """Sends the product list for the chosen category."""
+    product_list = PRODUCTS_EN.get(category_name, [])
+    if not product_list:
+        send_text_message(phone, "No products found for this category.")
+        return
         
-        print(f"\n{'='*50}\nINCOMING from {from_number}: '{msg_body}'")
-
-        if from_number not in user_states:
-            user_states[from_number] = {"data": {}, "language": "en"}
-
-        current_state = user_states[from_number].get("state")
-        lang = user_states[from_number].get("language", "en")
-        print(f"Current state for {from_number} is: '{current_state}'")
-
-        if command in ["hi", "hello", "नमस्ते"]:
-            exists = check_farmer_exists(from_number)
-            if exists:
-                set_user_state(from_number, "awaiting_login_password")
-                send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["welcome_back"])
-                send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_loginpassword"])
-            else:
-                set_user_state(from_number, "awaiting_language_choice")
-                send_whatsapp_audio(from_number, AUDIO_CLIPS["welcome"])
-                send_whatsapp_message(from_number, "Please select a language:\n1. English\n2. हिन्दी")
-
-        elif current_state == "awaiting_login_password":
-            login_resp = login_farmer_api(from_number, msg_body)
-            if login_resp and login_resp.get("access"):
-                user_states[from_number]["access_token"] = login_resp["access"]
-                set_user_state(from_number, "awaiting_state_selection")
-                ask_for_state_selection(from_number, lang)
-            else:
-                send_whatsapp_message(from_number, "❌ Incorrect password.")
-                send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_loginpassword"])
-
-        elif current_state == "awaiting_language_choice":
-            lang = "hi" if "2" in command else "en"
-            user_states[from_number]["language"] = lang
-            set_user_state(from_number, "awaiting_name")
-            send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_name"])
-
-        elif current_state == "awaiting_name":
-            user_states[from_number]["data"]["name"] = msg_body
-            set_user_state(from_number, "awaiting_address")
-            send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_address"])
-
-        elif current_state == "awaiting_address":
-            user_states[from_number]["data"]["address"] = msg_body
-            set_user_state(from_number, "awaiting_pincode")
-            send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_pincode"])
-
-        elif current_state == "awaiting_pincode":
-            user_states[from_number]["data"]["pincode"] = msg_body
-            set_user_state(from_number, "awaiting_password")
-            send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_password"])
+    header = f"Select a product from {category_name}:"
+    if lang == 'hi':
+        header = f"{category_name} से एक उत्पाद चुनें:"
         
-        elif current_state == "awaiting_password":
-            user_data = user_states[from_number]["data"]
-            user_data.update({
-                "password": msg_body,
-                "username": from_number,
-                "phone_number": from_number
-            })
-            if register_farmer_api(user_data):
-                login_resp = login_farmer_api(from_number, msg_body)
-                if login_resp and login_resp.get("access"):
-                    user_states[from_number]["access_token"] = login_resp["access"]
-                    set_user_state(from_number, "awaiting_state_selection")
-                    send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["reg_complete"])
-                    ask_for_state_selection(from_number, lang)
-                else:
-                    send_whatsapp_message(from_number, "Registration complete, but login failed. Please say 'hi' to try logging in.")
-            else:
-                send_whatsapp_message(from_number, "❌ Registration failed.")
-
-        elif current_state == "awaiting_state_selection":
-            state_name = STATES.get(command)
-            if not state_name:
-                send_whatsapp_message(from_number, "❌ Invalid selection. Please reply with a valid number from the list.")
-            else:
-                user_states[from_number]["temp_produce"] = {"state": state_name}
-                set_user_state(from_number, "awaiting_crop_name")
-                send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_crop"])
-
-        elif current_state == "awaiting_crop_name":
-            crop_name = msg_body.title()
-            state_name = user_states[from_number]["temp_produce"]["state"]
-            user_states[from_number]["temp_produce"]["name"] = crop_name
-            send_whatsapp_message(from_number, f"⏳ Searching for {crop_name} prices in {state_name}...")
-            # Price logic here...
-            set_user_state(from_number, "awaiting_price")
-            send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_price"])
-
-        elif current_state == "awaiting_price":
-            try:
-                user_states[from_number]["temp_produce"]["price_per_kg"] = float(msg_body)
-                set_user_state(from_number, "awaiting_quantity")
-                send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_quantity"])
-            except ValueError:
-                send_whatsapp_message(from_number, "❌ Please enter a valid number for the price (e.g., 25.50).")
-
-        elif current_state == "awaiting_quantity":
-            try:
-                user_states[from_number]["temp_produce"]["quantity_kg"] = float(msg_body)
-                token = user_states[from_number].get("access_token")
-                if token and add_produce_api(user_states[from_number]["temp_produce"], token):
-                    set_user_state(from_number, "awaiting_more_crops")
-                    send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["ask_more_crops"])
-                else:
-                    send_whatsapp_message(from_number, "❌ Failed to save produce. You may need to log in again. Say 'hi' to restart.")
-            except ValueError:
-                send_whatsapp_message(from_number, "❌ Please enter a valid number for the quantity (e.g., 50).")
-
-        elif current_state == "awaiting_more_crops":
-            if command in ["yes", "y", "ok", "1", "हाँ", "हां"]:
-                set_user_state(from_number, "awaiting_state_selection")
-                ask_for_state_selection(from_number, lang)
-            else:
-                send_whatsapp_audio(from_number, AUDIO_CLIPS[lang]["thank_you"])
-                set_user_state(from_number, "conversation_over")
-
-    except (IndexError, KeyError):
-        # Ignore non-message webhooks from Meta
-        pass
-    except Exception as e:
-        print(f"!!! A FATAL ERROR occurred in the webhook: {e} !!!")
-
-    return "OK", 200
+    product_text = "\n".join([f"{i+1}. {product}" for i, product in enumerate(product_list)])
+    send_text_message(phone, f"{header}\n{product_text}")
 
 
-@app.route("/notify-farmer", methods=["POST"])
+# --- Notification Endpoint ---
+@app.route("/notify", methods=["POST"])
 def notify_farmer():
-    # This function should be correct from previous versions.
-    pass
+    """Endpoint for the backend to call when a product is sold."""
+    data = request.get_json()
+    if not data or "phone" not in data or "message" not in data:
+        return jsonify({"error": "Invalid payload. 'phone' and 'message' are required."}), 400
+    
+    phone_number = data["phone"]
+    message = data["message"]
+    
+    send_text_message(phone_number, f"🎉 *Purchase Notification* 🎉\n\n{message}")
+    
+    return jsonify({"status": "notification_sent"}), 200
 
+
+# --- Run the App ---
 if __name__ == "__main__":
-    if not os.path.exists("static/audio"):
-        os.makedirs("static/audio")
-    print("WhatsApp Bot Running...")
-    app.run(port=5000, debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
