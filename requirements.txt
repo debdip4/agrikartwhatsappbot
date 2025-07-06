@@ -42,4 +42,3 @@ attrs==25.3.0
 sortedcontainers==2.4.0
 PySocks==1.7.1
 websocket-client==1.8.0
-beautifulsoup4
